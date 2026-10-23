@@ -24,9 +24,6 @@ public class KillAura extends Module {
     /** Degrees of yaw/pitch per single mouse count at sensitivity 1.0 (vanilla: 0.6^3 * 0.15). */
     private static final double MOUSE_UNIT = 0.216;
 
-    /** Kept for MoveFixLivingMixin: true when a silent jump-boost should follow the spoofed yaw. */
-    public static boolean fix;
-
     public final Setting.Switch toggle = new Setting.Switch("Enabled", false);
     public final Setting.Dropdown rotation = new Setting.Dropdown("Rotation", "Camera", "Silent", "Camera");
     public final Setting.Switch moveFix = new Setting.Switch("Move fix (silent)", false);
@@ -52,7 +49,15 @@ public class KillAura extends Module {
     public final Setting.Slider smooth = new Setting.Slider("Rotation smoothing", 0.1, 1, 0.6);
     public final Setting.Switch autoWeapon = new Setting.Switch("Auto weapon", true);
 
+    /** An attack waiting one tick so its look packet reaches the server first. */
+    private record Pending(LivingEntity target, boolean silent, boolean click, boolean cooldown, float yaw, float pitch) {
+        Pending(LivingEntity t, boolean silent, boolean click, float yaw, float pitch) {
+            this(t, silent, click, true, yaw, pitch);
+        }
+    }
+
     private LivingEntity target, lastTarget;
+    private Pending pending;
     private boolean have;
     private double curYaw, curPitch, accYaw, accPitch;
     private int seen, reaction;
@@ -95,9 +100,13 @@ public class KillAura extends Module {
         Minecraft mc = Minecraft.getInstance();
         var p = mc.player;
         if (p == null || mc.level == null || mc.gameMode == null || !p.isAlive() || p.isSpectator()) {
+            pending = null;
             reset();
             return;
         }
+        // Anything queued last tick was preceded by its movement packet: fire it first so the
+        // order on the wire is look -> attack, never attack -> look (Grim PacketOrderB).
+        flushPending(mc);
         boolean silent = rotation.value.equals("Silent");
 
         target = mc.mouseHandler.isMouseGrabbed() ? pickTarget(mc) : null;
@@ -203,12 +212,20 @@ public class KillAura extends Module {
         return b.getType() == HitResult.Type.MISS || eye.distanceToSqr(b.getLocation()) > eye.distanceToSqr(hit.get());
     }
 
+    /**
+     * Attacks are queued here and fired at the START of the NEXT tick, i.e. after the tick
+     * whose movement packet carried this aim has fully flushed. Attacking in the same tick we
+     * rotate means the interaction goes out before that tick's Rot packet, so Grim sees the
+     * attack with the OLD look on file -> PacketOrderB pre/post-attack, plus AntiKB/Simulation
+     * because the knockback direction is checked against a rotation we have not sent yet.
+     */
     private void attack(Minecraft mc, boolean silent) {
         var p = mc.player;
         var r = ThreadLocalRandom.current();
 
         clicks = Math.min(1.0, clicks + cps.value / 20.0 * Math.max(0.2, 1 + r.nextGaussian() * jitter.value / 100));
 
+        if (pending != null) return; // already waiting for its look packet to reach the server
         if (silent && !have) return;
         if (p.isUsingItem()) return;
         if (holdClick.value && !mc.options.keyAttack.isDown()) return;
@@ -234,15 +251,38 @@ public class KillAura extends Module {
         if (clicks < 1.0 - 1e-9) return;
 
         clicks -= 1.0;
-        if (autoWeapon.value) AutoTool.equipWeapon();
+        pending = new Pending(target, silent, click, cooldown.value, yaw, pitch);
+    }
 
-        if (click) {
+    /** Fires the queued attack now that our last sent rotation is what the server has on file. */
+    private void flushPending(Minecraft mc) {
+        if (pending == null) return;
+        var p = mc.player;
+        var q = pending;
+        pending = null;
+        if (p == null || mc.gameMode == null || !p.isAlive()) return;
+        LivingEntity t = q.target;
+        if (!t.isAlive() || t.distanceToSqr(p) > attackRange.value * attackRange.value + 4) return;
+
+        if (q.silent) {
+            // Re-check with exactly what we LAST SENT (not this tick's still-queued value):
+            // the interaction packet is processed by the server with that look. If it no
+            // longer hits, skip the hit but keep the spoofed rotation continuous instead of
+            // snapping back to the camera (a snap would itself flag Simulation).
+            if (!hits(mc, t, Rotation.yawSent, Rotation.pitchSent)) return;
+        } else if (q.click) {
+            if (!(mc.hitResult instanceof EntityHitResult er && er.getEntity() == t)) return;
+        }
+        if (q.cooldown && p.getAttackStrengthScale(0.5f) < 0.9f) return;
+
+        if (autoWeapon.value) AutoTool.equipWeapon();
+        if (q.click) {
             MouseUtil.clickLeft();
         } else {
             // gameMode.attack() already swings and sends the interaction packet with the
             // player's current rotation. A second manual swing here produced a duplicate
             // arm-animation packet right after the attack -> Grim "PacketOrder".
-            mc.gameMode.attack(p, target);
+            mc.gameMode.attack(p, t);
         }
         reroll();
     }
@@ -276,6 +316,8 @@ public class KillAura extends Module {
         accPitch -= cy;
 
         if (silent) {
+            // Keep the spoofed rotation continuous even while paused between attacks: no
+            // packet may carry a different look than the one we last sent.
             if (cx != 0 || cy != 0) {
                 // Accumulate in double and round once per tick, exactly like vanilla does
                 // with mouse counts: the sent rotation is always reachable by real input.
@@ -286,10 +328,9 @@ public class KillAura extends Module {
             Rotation.yaw = (float) curYaw;
             Rotation.pitch = (float) curPitch;
             have = true;
-            fix = moveFix.value && Math.abs(wrap(curYaw - p.getYRot())) > 1e-3;
         } else {
             if (cx != 0 || cy != 0) p.turn(cx * unitPerCount(mc), cy * unitPerCount(mc));
-            Rotation.spoof = fix = have = false;
+            Rotation.spoof = have = false;
         }
     }
 
@@ -306,7 +347,7 @@ public class KillAura extends Module {
     }
 
     private void reset() {
-        Rotation.spoof = fix = have = false;
+        Rotation.spoof = have = false;
         accYaw = accPitch = 0;
         lastTarget = null;
         reaction = 0;
