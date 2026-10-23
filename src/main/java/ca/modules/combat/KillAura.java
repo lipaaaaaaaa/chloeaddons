@@ -6,12 +6,10 @@ import ca.modules.player.AutoTool;
 import ca.util.MouseUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.component.SwingAnimation;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
@@ -21,6 +19,9 @@ import net.minecraft.world.phys.Vec3;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class KillAura extends Module {
+
+    /** Degrees of yaw/pitch per single mouse count at sensitivity 1.0 (vanilla: 0.6^3 * 0.15). */
+    private static final double MOUSE_UNIT = 0.216;
 
     public static boolean spoof, fix;
     public static float spoofYaw, spoofPitch;
@@ -51,7 +52,6 @@ public class KillAura extends Module {
     public final Setting.Switch autoWeapon = new Setting.Switch("Auto weapon", true);
 
     private LivingEntity target, lastTarget;
-    private float sentYaw, sentPitch;
     private boolean have;
     private double curYaw, curPitch, accYaw, accPitch;
     private int seen, reaction;
@@ -109,20 +109,24 @@ public class KillAura extends Module {
         if (target == null) {
             seen = 0;
             if (have) {
-                double deg = degPerCount(mc);
-                if (Math.hypot(wrap(p.getYRot() - curYaw), p.getXRot() - curPitch) < deg * 1.5) reset();
+                // Return the spoofed rotation to the camera before going inactive, so the
+                // last silent packet and the next real packet form a normal, small delta.
+                if (Math.hypot(wrap(p.getYRot() - curYaw), p.getXRot() - curPitch) < MOUSE_UNIT * 1.5) reset();
                 else step(mc, true, p.getYRot(), p.getXRot());
             }
             return;
         }
 
-        attack(mc, silent);
-
+        // Rotate FIRST, then attack: the interaction packet must carry the same rotation
+        // we just aimed with, otherwise Grim sees attack-before-rotation (PacketOrder /
+        // Invulnerable / simulation mismatch).
         Vec3 eye = p.getEyePosition();
         Vec3 d = aimPoint(eye, target).subtract(eye);
         step(mc, silent,
                 Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0,
                 -Math.toDegrees(Math.atan2(d.y, Math.hypot(d.x, d.z))));
+
+        attack(mc, silent);
     }
 
     private LivingEntity pickTarget(Minecraft mc) {
@@ -208,8 +212,11 @@ public class KillAura extends Module {
         if (p.isUsingItem()) return;
         if (holdClick.value && !mc.options.keyAttack.isDown()) return;
 
-        float yaw = silent ? sentYaw : p.getYRot();
-        float pitch = silent ? sentPitch : p.getXRot();
+        // Aim check uses the rotation that will actually be attached to the packet:
+        // in silent mode that is the spoofed yaw/pitch (the camera stays where the user
+        // points it), not the real one.
+        float yaw = silent ? spoofYaw : p.getYRot();
+        float pitch = silent ? spoofPitch : p.getXRot();
         if (!hits(mc, target, yaw, pitch)) {
             seen = 0;
             return;
@@ -231,8 +238,10 @@ public class KillAura extends Module {
         if (click) {
             MouseUtil.clickLeft();
         } else {
+            // gameMode.attack() already swings and sends the interaction packet with the
+            // player's current rotation. A second manual swing here produced a duplicate
+            // arm-animation packet right after the attack -> Grim "PacketOrder".
             mc.gameMode.attack(p, target);
-            p.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, true);
         }
         reroll();
     }
@@ -244,16 +253,23 @@ public class KillAura extends Module {
     private void step(Minecraft mc, boolean silent, double ty, double tp) {
         var p = mc.player;
         if (!silent || !have) {
+            // Start exactly at the real rotation: the first spoofed packet then has a
+            // zero delta and Grim's rotation tracker can never desync from us.
             curYaw = p.getYRot();
             curPitch = p.getXRot();
+            spoofYaw = (float) curYaw;
+            spoofPitch = (float) curPitch;
             if (silent && !have) accYaw = accPitch = 0;
         }
-        double dy = wrap(ty - curYaw), dp = tp - curPitch;
+        // Aim relative to the rotation we last SPOOFED (which equals the real one while
+        // inactive). If we aimed from the camera yaw instead, every tick would silently
+        // jump back toward it and Grim's consecutive-packet prediction would desync.
+        double dy = wrap(ty - curYaw);
+        double dp = tp - curPitch;
         double total = Math.hypot(dy, dp);
         double max = speed.value * (0.8 + ThreadLocalRandom.current().nextDouble() * 0.2);
         double k = Math.min(1.0, max / Math.max(total, 1e-6)) * smooth.value;
-        double unit = unitPerCount(mc);
-        double deg = degPerCount(mc);
+        double deg = MOUSE_UNIT;
         accYaw += dy * k / deg;
         accPitch += dp * k / deg;
         int cx = (int) accYaw, cy = (int) accPitch;
@@ -261,27 +277,25 @@ public class KillAura extends Module {
         accPitch -= cy;
 
         if (silent) {
-            curYaw += cx * deg;
-            curPitch = Math.clamp(curPitch + cy * deg, -90.0, 90.0);
-            spoofYaw = (float) curYaw;
-            spoofPitch = (float) curPitch;
-            sentYaw = spoofYaw;
-            sentPitch = spoofPitch;
+            if (cx != 0 || cy != 0) {
+                // Accumulate in double and round once per tick, exactly like vanilla does
+                // with mouse counts: the sent rotation is always reachable by real input.
+                curYaw = Mth.wrapDegrees(curYaw + cx * deg);
+                curPitch = Math.clamp(curPitch + cy * deg, -90.0, 90.0);
+                spoofYaw = (float) curYaw;
+                spoofPitch = (float) curPitch;
+            }
             spoof = true;
             have = true;
             fix = moveFix.value && Math.abs(wrap(curYaw - p.getYRot())) > 1e-3;
         } else {
-            if (cx != 0 || cy != 0) p.turn(cx * unit, cy * unit);
+            if (cx != 0 || cy != 0) p.turn(cx * unitPerCount(mc), cy * unitPerCount(mc));
             spoof = fix = have = false;
         }
     }
 
     private static double unitPerCount(Minecraft mc) {
         return Math.pow(mc.options.sensitivity().get() * 0.6 + 0.2, 3) * 8.0;
-    }
-
-    private static double degPerCount(Minecraft mc) {
-        return unitPerCount(mc) * 0.15;
     }
 
     private void reroll() {
@@ -308,19 +322,5 @@ public class KillAura extends Module {
 
     private static double wrap(double deg) {
         return ((deg + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
-    }
-
-    public static Vec3 fixInput(Vec3 in, float camYaw) {
-        double c = Math.max(Math.abs(in.x), Math.abs(in.z));
-        if (c < 1e-4) return in;
-        double d = Math.toRadians(camYaw - spoofYaw);
-        double x = in.x * Math.cos(d) - in.z * Math.sin(d);
-        double z = in.z * Math.cos(d) + in.x * Math.sin(d);
-        long k = Math.round(Math.atan2(z, x) / (Math.PI / 4));
-        double a = k * Math.PI / 4;
-        double m = k % 2 == 0 ? c : c * Math.sqrt(2);
-        double sx = Math.cos(a) * m, sz = Math.sin(a) * m;
-        double back = Math.toRadians(spoofYaw - camYaw);
-        return new Vec3(sx * Math.cos(back) - sz * Math.sin(back), in.y, sz * Math.cos(back) + sx * Math.sin(back));
     }
 }

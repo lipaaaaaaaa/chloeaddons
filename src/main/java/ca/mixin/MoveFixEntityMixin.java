@@ -1,20 +1,22 @@
 package ca.mixin;
 
-import ca.modules.combat.KillAura;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
-/** Move fix: physics for the local player use inputs the server can predict from the silent yaw. */
+/**
+ * Intentionally does nothing to movement input.
+ *
+ * The old version re-projected and 8-direction-snapped the local player's movement
+ * vector whenever KillAura's silent rotation was active. That made our actual movement
+ * differ from what Grim simulates from the rotation we send, which is exactly how the
+ * "AntiKB" and "simulation" flags get triggered (the server sees motion it cannot
+ * reproduce from our last known rotation).
+ *
+ * With a correct silent rotation (deltas that look like real mouse input, sent in the
+ * right packet order), vanilla movement is already consistent with the spoofed yaw, so
+ * no input warp is needed. This class stays mixed in as an inert placeholder so the
+ * existing mixin config entry keeps working.
+ */
 @Mixin(Entity.class)
 public class MoveFixEntityMixin {
-
-    @ModifyVariable(method = "moveRelative", at = @At("HEAD"), argsOnly = true)
-    private Vec3 ca$fixInput(Vec3 input) {
-        if (!KillAura.fix || !((Object) this instanceof LocalPlayer p)) return input;
-        return KillAura.fixInput(input, p.getYRot());
-    }
 }
