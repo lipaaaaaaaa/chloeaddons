@@ -1,5 +1,6 @@
 package ca.modules.combat;
 
+import ca.Rotation;
 import ca.Setting;
 import ca.modules.Module;
 import ca.modules.player.AutoTool;
@@ -23,8 +24,8 @@ public class KillAura extends Module {
     /** Degrees of yaw/pitch per single mouse count at sensitivity 1.0 (vanilla: 0.6^3 * 0.15). */
     private static final double MOUSE_UNIT = 0.216;
 
-    public static boolean spoof, fix;
-    public static float spoofYaw, spoofPitch;
+    /** Kept for MoveFixLivingMixin: true when a silent jump-boost should follow the spoofed yaw. */
+    public static boolean fix;
 
     public final Setting.Switch toggle = new Setting.Switch("Enabled", false);
     public final Setting.Dropdown rotation = new Setting.Dropdown("Rotation", "Camera", "Silent", "Camera");
@@ -118,8 +119,8 @@ public class KillAura extends Module {
         }
 
         // Rotate FIRST, then attack: the interaction packet must carry the same rotation
-        // we just aimed with, otherwise Grim sees attack-before-rotation (PacketOrder /
-        // Invulnerable / simulation mismatch).
+        // we just aimed with, otherwise Grim sees attack-before-rotation (PacketOrderB
+        // pre-attack / Invulnerable / simulation mismatch).
         Vec3 eye = p.getEyePosition();
         Vec3 d = aimPoint(eye, target).subtract(eye);
         step(mc, silent,
@@ -215,8 +216,8 @@ public class KillAura extends Module {
         // Aim check uses the rotation that will actually be attached to the packet:
         // in silent mode that is the spoofed yaw/pitch (the camera stays where the user
         // points it), not the real one.
-        float yaw = silent ? spoofYaw : p.getYRot();
-        float pitch = silent ? spoofPitch : p.getXRot();
+        float yaw = silent ? Rotation.yaw : p.getYRot();
+        float pitch = silent ? Rotation.pitch : p.getXRot();
         if (!hits(mc, target, yaw, pitch)) {
             seen = 0;
             return;
@@ -257,8 +258,6 @@ public class KillAura extends Module {
             // zero delta and Grim's rotation tracker can never desync from us.
             curYaw = p.getYRot();
             curPitch = p.getXRot();
-            spoofYaw = (float) curYaw;
-            spoofPitch = (float) curPitch;
             if (silent && !have) accYaw = accPitch = 0;
         }
         // Aim relative to the rotation we last SPOOFED (which equals the real one while
@@ -282,15 +281,15 @@ public class KillAura extends Module {
                 // with mouse counts: the sent rotation is always reachable by real input.
                 curYaw = Mth.wrapDegrees(curYaw + cx * deg);
                 curPitch = Math.clamp(curPitch + cy * deg, -90.0, 90.0);
-                spoofYaw = (float) curYaw;
-                spoofPitch = (float) curPitch;
             }
-            spoof = true;
+            Rotation.spoof = true;
+            Rotation.yaw = (float) curYaw;
+            Rotation.pitch = (float) curPitch;
             have = true;
             fix = moveFix.value && Math.abs(wrap(curYaw - p.getYRot())) > 1e-3;
         } else {
             if (cx != 0 || cy != 0) p.turn(cx * unitPerCount(mc), cy * unitPerCount(mc));
-            spoof = fix = have = false;
+            Rotation.spoof = fix = have = false;
         }
     }
 
@@ -307,7 +306,7 @@ public class KillAura extends Module {
     }
 
     private void reset() {
-        spoof = fix = have = false;
+        Rotation.spoof = fix = have = false;
         accYaw = accPitch = 0;
         lastTarget = null;
         reaction = 0;

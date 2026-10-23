@@ -1,6 +1,7 @@
 package ca.modules.player;
 
 import ca.HudEditScreen;
+import ca.Rotation;
 import ca.Setting;
 import ca.modules.Module;
 import ca.util.MouseUtil;
@@ -34,16 +35,17 @@ import java.util.concurrent.ThreadLocalRandom;
  * the block (centering) and places only when the aim really hits that face.
  *
  * Camera mode: only the pitch moves, yaw stays yours.
- * Silent rotate: the camera is never touched, only the pitch sent to the server changes (ScaffoldRotationMixin).
- * The yaw is never spoofed, because a different yaw makes the server predict different movement.
+ * Silent rotate: the camera is never touched, only the pitch written into Rotation changes
+ * (SendRotationSyncMixin + RotationPacketMixin put it on the wire together with the last Rot
+ * packet we actually sent). The yaw stays ours, so the server predicts the same movement.
  * The block is placed at the START of the next tick, before that tick's movement packet and with the rotation
  * the server already got, like a real click.
  */
 public class Scaffold extends Module {
 
-    /** Read by the mixins. */
-    public static boolean spoof;
-    public static float spoofPitch;
+    /** Last rotation we handed to the packet pipeline (what the server has on file). */
+    private float rotYaw, rotPitch;
+    private boolean rotHave;
 
     public final Setting.Switch toggle = new Setting.Switch("Enabled", false);
     public final Setting.Switch silent = new Setting.Switch("Silent rotate", false);
@@ -106,7 +108,7 @@ public class Scaffold extends Module {
         // Manual placements use the camera rotation while the server has the spoofed one, so block them.
         // This event also fires on the integrated server, so only the client side may be touched.
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
-                level.isClientSide() && spoof && !placing ? InteractionResult.FAIL : InteractionResult.PASS);
+                level.isClientSide() && Rotation.spoof && !placing ? InteractionResult.FAIL : InteractionResult.PASS);
     }
 
     @Override
@@ -196,7 +198,12 @@ public class Scaffold extends Module {
      * server got in the previous tick's packet. Placing after the movement packet gets flagged as Post by Grim.
      */
     private void placeSilent(Minecraft mc, long now) {
-        BlockHitResult h = clip(mc, sentYaw, sentPitch);
+        // The server processes this interaction with the look from the PREVIOUS tick's Rot
+        // packet, so the raycast must use exactly that rotation (rotYaw/rotPitch), never
+        // the camera and never this tick's not-yet-sent value. Otherwise Grim sees a click
+        // outside the view angle it has on file -> groundspoof / Simulation flags.
+        if (!rotHave) return;
+        BlockHitResult h = clip(mc, rotYaw, rotPitch);
         if (!match(h, target) || mc.gameMode == null) return;
         placing = true;
         try {
@@ -302,27 +309,51 @@ public class Scaffold extends Module {
         return bd == Double.MAX_VALUE || match(clip(mc, yaw, noisy), t) ? noisy : best;
     }
 
-    /** Eases the offset between the camera and the rotation sent to the server. Whole mouse counts only. */
+    /**
+     * Eases the offset between the camera and the rotation sent to the server, in whole
+     * mouse counts, then hands it to Rotation. We also remember the last rotation that was
+     * really on the wire (rotYaw/rotPitch): placements are validated against THAT, because
+     * the interaction packet is processed by the server with the look from the previous tick.
+     */
     private void updateSilent(Minecraft mc) {
+        var p = mc.player;
         if (!silent.value) {
             reset();
+            Rotation.spoof = false;
             return;
         }
-        var p = mc.player;
+        // If Kill Aura is silently aiming, its rotation wins: use exactly what goes out.
+        if (Rotation.spoof) {
+            rotYaw = Rotation.yaw;
+            rotPitch = Rotation.pitch;
+            rotHave = true;
+            haveSent = true;
+            sentYaw = rotYaw;
+            sentPitch = rotPitch;
+            return;
+        }
         // Pitch only: the yaw stays the camera yaw, so the server predicts the same movement as the client
         double tp = active ? camPitch - p.getXRot() : 0;
         double deg = degPerCount(mc);
         offPitch = Math.round((offPitch + (tp - offPitch) * 0.5) / deg) * deg;
-        spoof = offPitch != 0;
-        spoofPitch = (float) Math.clamp(p.getXRot() + offPitch, -90.0, 90.0);
-        sentYaw = p.getYRot();
-        sentPitch = spoofPitch;
+        boolean on = offPitch != 0;
+        Rotation.spoof = on;
+        if (on) {
+            Rotation.yaw = p.getYRot();
+            Rotation.pitch = (float) Math.clamp(p.getXRot() + offPitch, -90.0, 90.0);
+        }
+        rotYaw = on ? Rotation.yaw : p.getYRot();
+        rotPitch = on ? Rotation.pitch : p.getXRot();
+        rotHave = true;
         haveSent = true;
+        sentYaw = rotYaw;
+        sentPitch = rotPitch;
     }
 
     private void reset() {
         offPitch = 0;
-        spoof = haveSent = false;
+        haveSent = false;
+        rotHave = false;
     }
 
     @Override
