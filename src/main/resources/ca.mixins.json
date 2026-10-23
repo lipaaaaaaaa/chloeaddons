@@ -4,6 +4,8 @@
   "package": "ca.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "AccessorClientInput",
+    "AccessorLocalPlayer",
     "ParticleEngineMixin",
     "ClientLevelMixin",
     "FontMixin",
@@ -14,9 +16,13 @@
     "ExploitGuardMixin",
     "MoveFixLivingMixin",
     "MoveFixEntityMixin",
+    "MoveFixPlayerMixin",
+    "CameraSneakMixin",
     "TpsMixin",
     "OldSneakMixin",
-    "ViewmodelMixin"
+    "ViewmodelMixin",
+    "OutgoingRotationPacketMixin",
+    "AvatarRotationRenderMixin"
   ],
   "injectors": {
     "defaultRequire": 1

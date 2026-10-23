@@ -53,6 +53,9 @@ public class Triggerbot extends Module {
 
         AutoTool.equipWeapon();
 
+        // After the equip: swapping items resets the cooldown. Only a charged hit applies the sprint slowdown.
+        if (mc.player.getAttackStrengthScale(0.5f) < 0.9f) return;
+
         long now = System.nanoTime();
         if (now - lastAttack < delay) return;
         lastAttack = now;

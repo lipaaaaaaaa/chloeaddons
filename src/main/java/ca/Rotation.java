@@ -1,16 +1,19 @@
 package ca;
 
-/**
- * Single source of truth for the rotation we send to the server.
- * Kill Aura owns the yaw, Scaffold owns the pitch (Kill Aura wins while it spoofs).
- * Modules WRITE these fields, mixins READ them, so movement packets, interactions and
- * client-side hit checks can never disagree about which rotation the server has on file.
- */
 public final class Rotation {
 
-    public static boolean spoof;            // true = sent rotation differs from the camera
-    public static float yaw, pitch;         // the rotation every outgoing packet must carry
-    public static float yawSent, pitchSent; // what we last actually put on the wire
+    public static volatile boolean spoof;
+    public static volatile boolean moveFix;
+    public static volatile boolean showPacketRotation;
+
+    public static volatile float yaw;
+    public static volatile float pitch;
+
+    /** Rotation the server last saw. */
+    public static volatile float yawSent;
+    public static volatile float pitchSent;
+
+    public static volatile boolean packetRotationKnown;
 
     private Rotation() {}
 }

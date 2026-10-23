@@ -322,16 +322,6 @@ public class Scaffold extends Module {
             Rotation.spoof = false;
             return;
         }
-        // If Kill Aura is silently aiming, its rotation wins: use exactly what goes out.
-        if (Rotation.spoof) {
-            rotYaw = Rotation.yaw;
-            rotPitch = Rotation.pitch;
-            rotHave = true;
-            haveSent = true;
-            sentYaw = rotYaw;
-            sentPitch = rotPitch;
-            return;
-        }
         // Pitch only: the yaw stays the camera yaw, so the server predicts the same movement as the client
         double tp = active ? camPitch - p.getXRot() : 0;
         double deg = degPerCount(mc);
@@ -436,6 +426,8 @@ public class Scaffold extends Module {
         active = false;
         target = null;
         reset();
+        // onTick stops running once disabled, so nothing else would ever clear a silent rotation
+        Rotation.spoof = false;
         release(Minecraft.getInstance());
         clearCenter();
     }

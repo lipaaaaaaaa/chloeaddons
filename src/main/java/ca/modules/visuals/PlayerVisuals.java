@@ -41,7 +41,7 @@ public class PlayerVisuals extends Module {
     private final Setting.Switch enabled = new Setting.Switch("Enabled", false);
 
     private final Setting.Switch esp = new Setting.Switch("ESP box", true);
-    private final Setting.Color espColor = new Setting.Color("ESP color", 0xFFFFFFFF);
+    private final Setting.Color espColor = new Setting.Color("ESP color", 0xFFFF0000);
     private final Setting.Switch showItem = new Setting.Switch("Held item", true);
     private final Setting.Switch showDistance = new Setting.Switch("Distance", true);
     private final Setting.Switch armor = new Setting.Switch("Armor icons", true);
@@ -50,10 +50,10 @@ public class PlayerVisuals extends Module {
     private final Setting.Dropdown espAttackable = new Setting.Dropdown("ESP attackable", "Indicator", "Off", "Indicator", "Invert");
 
     private final Setting.Switch box3d = new Setting.Switch("3D box", true);
-    private final Setting.Color box3dColor = new Setting.Color("3D box color", 0xFFE5155E);
+    private final Setting.Color box3dColor = new Setting.Color("3D box color", 0xFFFF0000);
     private final Setting.Switch box3dFill = new Setting.Switch("3D fill", false);
     private final Setting.Slider box3dFillAlpha = new Setting.Slider("3D fill alpha", 0, 255, 60);
-    private final Setting.Dropdown box3dAttackable = new Setting.Dropdown("3D box attackable", "Invert", "Off", "Indicator", "Invert");
+    private final Setting.Dropdown box3dAttackable = new Setting.Dropdown("3D box attackable", "Off", "Off", "Indicator", "Invert");
 
     private final List<Box3D> boxes = new ArrayList<>();
 

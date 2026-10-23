@@ -13,8 +13,7 @@ public class AlwaysSprint extends Module {
     @Override
     public void onTick() {
         var mc = Minecraft.getInstance();
-        var p = mc.player;
-        if (p == null || p.isSprinting() || !mc.options.keyUp.isDown() || p.isShiftKeyDown() || p.isUsingItem() || p.horizontalCollision) return;
-        if (p.getFoodData().getFoodLevel() > 6 || p.getAbilities().mayfly) p.setSprinting(true);
+        if (mc.player == null) return;
+        mc.options.keySprint.setDown(mc.options.keyUp.isDown());
     }
 }
