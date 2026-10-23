@@ -64,20 +64,27 @@ public class SendRotationSyncMixin {
     private void ca$after(CallbackInfo ci) {
         LocalPlayer p = (LocalPlayer) (Object) this;
         if (Rotation.spoof) {
-            ca$sentYaw = Rotation.yaw;
-            ca$sentPitch = Rotation.pitch;
+            // Whatever rotation actually left inside vanilla's own code paths is now what
+            // yRotLast/xRotLast hold, so remember THAT as the server-side look. Reading the
+            // module fields here would be wrong when vanilla decided to send a Pos-only
+            // packet: yawSent/pitchSent must always equal the last look the server received,
+            // or hit-checks against it disagree with Grim (PacketOrderB / Simulation).
+            ca$sentYaw = p.yRotLast;
+            ca$sentPitch = p.xRotLast;
             ca$haveSent = true;
-            Rotation.yawSent = Rotation.yaw;
-            Rotation.pitchSent = Rotation.pitch;
+            Rotation.yawSent = p.yRotLast;
+            Rotation.pitchSent = p.xRotLast;
             // Restore the camera so rendering/input are untouched by our little trick.
-            if (ca$haveSent && (p.getYRot() != ca$camYaw || p.getXRot() != ca$camPitch)) {
+            if (p.getYRot() != ca$camYaw || p.getXRot() != ca$camPitch) {
                 p.setYRot(ca$camYaw);
                 p.setXRot(ca$camPitch);
             }
-            // yRotLast/xRotLast now hold the SPOOFED values (vanilla wrote them at TAIL),
-            // which is exactly what we want: they track what went out.
         } else if (ca$haveSent) {
+            // We stopped spoofing: make sure vanilla's bookkeeping tracks the real camera
+            // again, otherwise its next delta is computed against our last silent value.
             ca$haveSent = false;
+            p.yRotLast = p.getYRot();
+            p.xRotLast = p.getXRot();
         }
     }
 }
