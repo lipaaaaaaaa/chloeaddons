@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "ca.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ParticleEngineMixin",
+    "ClientLevelMixin",
+    "FontMixin",
+    "FreecamCameraMixin",
+    "FreecamEntityMixin",
+    "ScaffoldRotationMixin",
+    "ExploitGuardMixin",
+    "MoveFixLivingMixin",
+    "MoveFixEntityMixin",
+    "TpsMixin",
+    "OldSneakMixin",
+    "ViewmodelMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

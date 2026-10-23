@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "ca",
+  "version": "1.0.0",
+  "name": "CA",
+  "environment": "client",
+  "entrypoints": { "client": ["ca.CA"] },
+  "mixins": [
+    "ca.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": "*",
+    "minecraft": ">=26.1",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
